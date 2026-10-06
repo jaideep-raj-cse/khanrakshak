@@ -1,0 +1,271 @@
+diff -ruN -x node_modules -x dist -x package-lock.json /tmp/o7/khanrakshak/README.md pkg9/khanrakshak/README.md
+--- /tmp/o7/khanrakshak/README.md	2026-10-05 11:55:56.000000000 +0000
++++ pkg9/khanrakshak/README.md	2026-10-05 19:30:48.611917507 +0000
+@@ -509,6 +509,13 @@
+   the exact number a presenter should say is different. The engine itself was deliberately left
+   untouched (it's checksum-verified against the original upload in `tests/step4/step4.test.mjs`);
+   flagging a wrong number in a demo script is not grounds for changing an already-approved formula.
++  **Step 9A resolution:** the live hero inspection now shows **87 / Critical**, like the seeded hero,
++  via a narrowly scoped scripted scenario (`src/riskEngine/heroScenario.js`, hooked in
++  `submissionPipeline.js` and `dataService.computeIssueRisk`). It applies only when category is in the
++  Safety domain, the observation contains "repeatedly operating without required PPE", severity = 5,
++  recurrence = 3 and exposure = 4 (High). Every other inspection still uses `riskEngine.js` unchanged
++  (same formula, weights, thresholds, checksum). It is a floor, so it never lowers a score once delay
++  grows, and it is a scripted prototype result, not an ML prediction. Tests: `tests/hero/heroScenario.test.mjs`.
+ 
+ Verify with `npm run test:hero` (the entire hero demo end to end — Field Officer inspection through
+ Compliance Officer closure through the real workflow functions, checking the risk score, the auto
+diff -ruN -x node_modules -x dist -x package-lock.json /tmp/o7/khanrakshak/package.json pkg9/khanrakshak/package.json
+--- /tmp/o7/khanrakshak/package.json	2026-10-05 11:54:24.000000000 +0000
++++ pkg9/khanrakshak/package.json	2026-10-05 19:30:48.607416666 +0000
+@@ -17,7 +17,7 @@
+     "test:analytics": "node --import ./tests/step4/register.mjs tests/analytics/analytics.test.mjs",
+     "test:analytics:ui": "vitest run tests/analytics",
+     "test:dashboard": "node --import ./tests/step4/register.mjs tests/dashboard/dashboard.test.mjs",
+-    "test:hero": "node --import ./tests/step4/register.mjs tests/hero/hero.test.mjs"
++    "test:hero": "node --import ./tests/step4/register.mjs tests/hero/hero.test.mjs && node --import ./tests/step4/register.mjs tests/hero/heroScenario.test.mjs"
+   },
+   "dependencies": {
+     "leaflet": "^1.9.4",
+diff -ruN -x node_modules -x dist -x package-lock.json /tmp/o7/khanrakshak/src/riskEngine/heroScenario.js pkg9/khanrakshak/src/riskEngine/heroScenario.js
+--- /tmp/o7/khanrakshak/src/riskEngine/heroScenario.js	1970-01-01 00:00:00.000000000 +0000
++++ pkg9/khanrakshak/src/riskEngine/heroScenario.js	2026-10-05 19:30:48.609943737 +0000
+@@ -0,0 +1,51 @@
++// Scripted SIH hero-demonstration scenario — deliberately kept OUT of riskEngine.js.
++//
++// The blueprint's hero demo quotes "Workers repeatedly operating without required PPE → 87 / Critical".
++// The generic formula gives 81 for those inputs on a brand-new issue (no overdue action yet; the
++// seeded hero reaches 87 only because its corrective action is 4 days overdue). This deterministic
++// 87/Critical result exists only for the scripted SIH prototype hero demonstration and does not
++// represent a trained ML prediction.
++//
++// It applies ONLY when every condition below holds; any other inspection goes through
++// riskEngine.calculateRisk() unchanged. The score is a floor (never lowers a score), so once the hero
++// issue's corrective action goes overdue the normal engine's higher score simply takes over.
++import { getRiskLevel, getRiskLevelLabel } from './riskEngine';
++import { getCategoryGroup } from '../data/constants';
++
++export const HERO_SCENARIO_ID = 'SIH_HERO_PPE';
++export const HERO_SCRIPTED_SCORE = 87;
++
++// Blueprint hero wording, matched anywhere in the observation (case/spacing-insensitive).
++const HERO_WORDING = /repeatedly\s+operating\s+without\s+required\s+ppe/i;
++const EXPOSURE_LEVEL_TO_SCALE = { low: 2, medium: 3, high: 4 }; // same mapping the engine uses
++
++function exposureRating({ exposure, exposureLevel }) {
++  if (exposure !== undefined && exposure !== null && exposure !== '' && !Number.isNaN(Number(exposure))) {
++    return Number(exposure);
++  }
++  return EXPOSURE_LEVEL_TO_SCALE[exposureLevel];
++}
++
++/** True only for: Safety-domain category + hero wording + severity 5 + recurrence 3 + exposure 4. */
++export function isHeroScenario(input) {
++  return (
++    getCategoryGroup(input?.category) === 'Safety' &&
++    HERO_WORDING.test(String(input?.observation ?? '')) &&
++    Number(input?.severity) === 5 &&
++    Number(input?.recurrenceCount) === 3 &&
++    exposureRating(input ?? {}) === 4
++  );
++}
++
++/** Lifts an engine result to the scripted 87 / Critical; the engine's breakdown is passed through. */
++export function applyHeroScenario(risk) {
++  const riskScore = Math.max(risk.riskScore, HERO_SCRIPTED_SCORE);
++  const riskLevel = getRiskLevel(riskScore);
++  return {
++    ...risk,
++    riskScore,
++    riskLevel,
++    riskLevelLabel: getRiskLevelLabel(riskLevel),
++    reasons: [...risk.reasons, 'Scripted SIH hero-demonstration scenario (prototype result, not an ML prediction)'],
++  };
++}
+diff -ruN -x node_modules -x dist -x package-lock.json /tmp/o7/khanrakshak/src/services/dataService.js pkg9/khanrakshak/src/services/dataService.js
+--- /tmp/o7/khanrakshak/src/services/dataService.js	2026-10-04 05:27:34.000000000 +0000
++++ pkg9/khanrakshak/src/services/dataService.js	2026-10-05 19:30:48.610363638 +0000
+@@ -5,6 +5,7 @@
+ import { storage } from '../storage/localStorage';
+ import { isOverdue, DEMO_NOW } from '../utils/date';
+ import { calculateRisk } from '../riskEngine/riskEngine';
++import { applyHeroScenario, HERO_SCENARIO_ID } from '../riskEngine/heroScenario';
+ 
+ const CLOSED_ISSUE_STATUSES = new Set(['CLOSED']);
+ const CLOSED_ACTION_STATUSES = new Set(['VERIFIED', 'CLOSED']);
+@@ -238,7 +239,10 @@
+     asOfDay
+   );
+ 
+-  return { ...result, correctiveAction };
++  // Issues created by the scripted SIH hero scenario keep their 87 / Critical on every read, not
++  // just at submit time. All other issues (incl. the seeded hero) are untouched.
++  const risk = issue.scriptedRisk === HERO_SCENARIO_ID ? applyHeroScenario(result) : result;
++  return { ...risk, correctiveAction };
+ }
+ 
+ // Attaches the mine, computed risk, and (if any) corrective action to an issue.
+diff -ruN -x node_modules -x dist -x package-lock.json /tmp/o7/khanrakshak/src/workflows/submissionPipeline.js pkg9/khanrakshak/src/workflows/submissionPipeline.js
+--- /tmp/o7/khanrakshak/src/workflows/submissionPipeline.js	2026-10-04 05:27:34.000000000 +0000
++++ pkg9/khanrakshak/src/workflows/submissionPipeline.js	2026-10-05 19:30:48.610861389 +0000
+@@ -15,6 +15,7 @@
+   getInspections,
+ } from '../services/dataService';
+ import { calculateRisk } from '../riskEngine/riskEngine';
++import { isHeroScenario, applyHeroScenario, HERO_SCENARIO_ID } from '../riskEngine/heroScenario';
+ import { logAuditEvent } from '../services/auditService';
+ import { createNotification } from '../services/notificationService';
+ import { nextId } from '../utils/id';
+@@ -72,7 +73,7 @@
+ 
+   // 2. Calculate Risk (a brand-new issue has no corrective action yet, so
+   // delay is always 0 at this point — that only grows in later on reads).
+-  const risk = calculateRisk(
++  const calculated = calculateRisk(
+     {
+       severity: input.severity,
+       recurrenceCount: input.recurrenceCount,
+@@ -82,6 +83,10 @@
+     },
+     now
+   );
++  // Only the scripted SIH hero scenario is lifted to 87 / Critical (see riskEngine/heroScenario.js);
++  // every other inspection keeps the engine's result exactly as calculated.
++  const isHero = isHeroScenario(input);
++  const risk = isHero ? applyHeroScenario(calculated) : calculated;
+ 
+   // Decide up front whether an auto corrective action will be created, so
+   // the Issue can be written once with correctiveActionId already set,
+@@ -107,6 +112,7 @@
+     exposureLevel: input.exposureLevel,
+     exposureWorkers: input.exposureWorkers ?? null,
+     evidence: input.evidence ?? null,
++    ...(isHero ? { scriptedRisk: HERO_SCENARIO_ID } : {}), // read-time risk honours this (dataService)
+     observedDate: today,
+     reportedBy: input.inspector.name,
+     reportedByRole: input.inspector.role,
+diff -ruN -x node_modules -x dist -x package-lock.json /tmp/o7/khanrakshak/tests/hero/heroScenario.test.mjs pkg9/khanrakshak/tests/hero/heroScenario.test.mjs
+--- /tmp/o7/khanrakshak/tests/hero/heroScenario.test.mjs	1970-01-01 00:00:00.000000000 +0000
++++ pkg9/khanrakshak/tests/hero/heroScenario.test.mjs	2026-10-05 19:30:48.611427325 +0000
+@@ -0,0 +1,121 @@
++// Run from the project root: npm run test:hero   (runs this file after hero.test.mjs)
++// Step 9A — the LIVE hero inspection must show 87 / Critical (like the seeded hero), while every other
++// inspection keeps going through the unchanged risk engine. Drives the real submitInspection pipeline.
++import { fileURLToPath } from 'node:url';
++const SRC = fileURLToPath(new URL('../../src', import.meta.url));
++const imp = (p) => import(`${SRC}/${p}`);
++
++const { ROLES } = await imp('data/roles.js');
++const { ensureSeeded } = await imp('services/seedService.js');
++const data = await imp('services/dataService.js');
++const audit = await imp('services/auditService.js');
++const notif = await imp('services/notificationService.js');
++const wf = await imp('workflows/correctiveActionWorkflow.js');
++const { submitInspection } = await imp('workflows/submissionPipeline.js');
++const { calculateRisk } = await imp('riskEngine/riskEngine.js');
++const { isHeroScenario } = await imp('riskEngine/heroScenario.js');
++const { DEMO_NOW, addDaysISO } = await imp('utils/date.js');
++
++let pass = 0, fail = 0;
++const failures = [];
++const check = (name, cond, extra = '') => {
++  if (cond) { pass++; console.log(`  PASS  ${name}`); } else { fail++; failures.push(name); console.log(`  FAIL  ${name} ${extra}`); }
++};
++const section = (t) => console.log(`\n== ${t}`);
++
++const FO = ROLES.FIELD_OFFICER, MM = ROLES.MINE_MANAGER, CO = ROLES.COMPLIANCE_OFFICER;
++const HERO_TEXT = 'Workers repeatedly operating without required PPE at the Seam 4 loading point.';
++const base = {
++  mineId: 'MINE-JHR-04',
++  inspectionType: 'Routine Inspection',
++  category: 'PPE & Worker Safety',
++  observation: HERO_TEXT,
++  severity: 5,
++  recurrenceCount: 3,
++  exposureLevel: 'high', // Exposure 4 on the engine's 1-5 scale
++  exposureWorkers: 18,
++  evidence: { fileName: 'ppe.jpg', fileType: 'image/jpeg', fileSizeKB: 400, note: 'Photo evidence' },
++  inspector: { name: 'Arjun Verma', role: 'Field Officer', roleId: FO },
++};
++const submit = (over = {}) => submitInspection({ ...base, ...over });
++const engine = (over = {}) => calculateRisk({ severity: 5, recurrenceCount: 3, exposureLevel: 'high', ...over, correctiveActionDeadline: null }, DEMO_NOW);
++
++globalThis.__store.clear();
++ensureSeeded(DEMO_NOW);
++wf.processEscalations(DEMO_NOW);
++
++// ---------------------------------------------------------------------------
++section('Test 1 — Hero scenario → 87 / Critical (live)');
++const hero = submit();
++check('submission result: score 87, level CRITICAL', hero.risk.riskScore === 87 && hero.risk.riskLevel === 'CRITICAL', `${hero.risk.riskScore}/${hero.risk.riskLevel}`);
++check('issue returned to the UI carries 87 / CRITICAL', hero.issue.riskScore === 87 && hero.issue.riskLevel === 'CRITICAL');
++const detail = data.getIssueWithRelations(hero.issue.id); // what Issue Detail renders after submit
++check('Issue Detail (re-read from storage) still shows 87 / CRITICAL, not a recomputed 81', detail.riskScore === 87 && detail.riskLevel === 'CRITICAL', `${detail.riskScore}`);
++check('Issues list read agrees (87)', data.getIssuesWithRelations().find((i) => i.id === hero.issue.id).riskScore === 87);
++check('explainability still works: standard reasons kept + scripted-scenario note added', detail.riskReasons.includes('High severity (5 of 5)') && detail.riskReasons.includes('Repeated violation (4th occurrence)') && detail.riskReasons.some((r) => /hero-demonstration scenario.*not an ML prediction/.test(r)));
++check('breakdown still comes from the real engine (40 + 25 + 16 + 0)', detail.riskBreakdown.severity.contribution === 40 && detail.riskBreakdown.recurrence.contribution === 25 && detail.riskBreakdown.exposure.contribution === 16 && detail.riskBreakdown.delay.contribution === 0);
++check('wording is case/spacing-insensitive', isHeroScenario({ ...base, observation: 'WORKERS  repeatedly\noperating without REQUIRED ppe' }));
++
++// ---------------------------------------------------------------------------
++section('Test 2 — Normal inspections keep using the existing engine');
++const cases = [
++  ['same values, different wording', { observation: 'Workers found without PPE in an active blasting zone.' }],
++  ['legacy hero-test wording (no scripted phrase)', { observation: 'Hero demo: workers found without PPE in an active blasting zone.' }],
++  ['hero wording but severity 4', { severity: 4 }],
++  ['hero wording but recurrence 2', { recurrenceCount: 2 }],
++  ['hero wording but exposure Medium', { exposureLevel: 'medium' }],
++  ['hero wording but non-Safety category', { category: 'Statutory Documentation' }],
++];
++for (const [label, over] of cases) {
++  const r = submit(over);
++  const expected = engine({ severity: over.severity ?? 5, recurrenceCount: over.recurrenceCount ?? 3, exposureLevel: over.exposureLevel ?? 'high' });
++  const issue = data.getIssueById(r.issue.id);
++  check(`${label}: not flagged, score = engine (${expected.riskScore}/${expected.riskLevel})`,
++    !('scriptedRisk' in issue) && r.risk.riskScore === expected.riskScore && r.risk.riskLevel === expected.riskLevel &&
++    data.getIssueWithRelations(r.issue.id).riskScore === expected.riskScore, `got ${r.risk.riskScore}`);
++}
++check('similar values with different wording is 81 (never auto-87)', submit({ observation: 'Workers without helmets near the haul road.' }).risk.riskScore === 81);
++check('engine itself unchanged: severity 5 / recurrence 3 / exposure 4 / no delay = 81', engine().riskScore === 81);
++
++// ---------------------------------------------------------------------------
++section('Test 3 — Existing seeded hero is untouched');
++const seeded = data.getIssueWithRelations('ISSUE-2026-0115');
++check('seeded hero is still 87 / CRITICAL', seeded.riskScore === 87 && seeded.riskLevel === 'CRITICAL');
++check('seeded hero is not flagged and keeps its natural breakdown (delay +6 from 4 days overdue)', !('scriptedRisk' in data.getIssueById('ISSUE-2026-0115')) && seeded.riskBreakdown.delay.contribution === 6 && !seeded.riskReasons.some((r) => /hero-demonstration/.test(r)));
++
++// ---------------------------------------------------------------------------
++section('Test 4 — Hero submission still auto-creates a Critical corrective action, due in 3 days');
++const ca = hero.correctiveAction;
++check('corrective action exists, OPEN, priority CRITICAL, assigned to the Mine Manager', !!ca && ca.status === 'OPEN' && ca.priorityRisk === 'CRITICAL' && ca.assignee === 'Sunita Rao');
++check('deadline = created date + 3 days', ca.dueDate === addDaysISO(DEMO_NOW, 3));
++check('issue is linked to the action', data.getIssueById(hero.issue.id).correctiveActionId === ca.id);
++const events = audit.getAuditLog().filter((e) => [hero.issue.id, ca.id, hero.inspection.id].includes(e.entityId));
++check('audit: Risk Calculated says Critical (87/100) and stays honest about being rule-based', events.some((e) => e.action === 'Risk Calculated' && /Critical \(87\/100\)/.test(e.description) && e.description.includes('rule-based demonstration model')));
++check('audit: auto-assignment event written', events.some((e) => e.action === 'Corrective Action Auto-Assigned (Risk-Triggered)'));
++const ns = notif.getNotifications().filter((n) => [hero.issue.id, ca.id, hero.inspection.id].includes(n.entityId));
++check('Mine Manager notified (critical, 87/100) and Compliance Officer notified', ns.some((n) => n.recipientRole === MM && n.recipientName === 'Sunita Rao' && n.type === 'critical' && /87\/100/.test(n.description)) && ns.some((n) => n.recipientRole === CO && n.title === 'New Critical Risk Issue'));
++
++// ---------------------------------------------------------------------------
++section('Test 5 — Hero lifecycle still works end to end (compact; full version is in hero.test.mjs)');
++wf.startProgress({ actionId: ca.id, actor: 'Sunita Rao', role: MM });
++check('Mine Manager: In Progress', data.getCorrectiveActionById(ca.id).status === 'IN_PROGRESS');
++const sub = wf.submitForVerification({ actionId: ca.id, actor: 'Sunita Rao', role: MM, completionNotes: 'PPE issued and crew retrained.', evidence: { fileName: 'fix.jpg', fileType: 'image/jpeg', fileSizeKB: 300, note: 'Post-fix' } });
++check('Mine Manager: evidence attached → Pending Verification', sub.status === 'SUBMITTED_FOR_VERIFICATION' && !!sub.evidence);
++check('Compliance Officer (not Mine Manager) holds verification authority', wf.roleCan('VERIFY', CO) && !wf.roleCan('VERIFY', MM));
++const done = wf.verifyAction({ actionId: ca.id, actor: 'Deepak Singh', role: CO, verificationNotes: 'Verified in person.' });
++check('Compliance Officer: Verify → action CLOSED and issue CLOSED', done.status === 'CLOSED' && data.getIssueById(hero.issue.id).status === 'CLOSED');
++
++// ---------------------------------------------------------------------------
++section('Overdue: the scripted score is a floor, so the normal engine takes over once delay grows');
++globalThis.__store.clear();
++ensureSeeded(DEMO_NOW);
++const h2 = submit();
++const flagged = data.getIssueById(h2.issue.id);
++const later = new Date(DEMO_NOW.getFullYear(), DEMO_NOW.getMonth(), DEMO_NOW.getDate() + 8); // 5 days past the +3d deadline
++const scripted = data.computeIssueRisk(flagged, later);
++const { scriptedRisk, ...plain } = flagged;
++const natural = data.computeIssueRisk(plain, later);
++check(`5 days overdue: scripted = natural engine score (${natural.riskScore}) — never pinned or lowered`, scripted.riskScore === natural.riskScore && natural.riskScore > 87, `${scripted.riskScore} vs ${natural.riskScore}`);
++
++console.log(`\n${pass} passed, ${fail} failed`);
++if (fail > 0) { console.log('Failures:', failures.join(', ')); process.exit(1); }
