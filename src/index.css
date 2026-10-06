@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: #0b0f19;
+}
+
+/* Thin, industrial scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0f19;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+.mono-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- GIS Risk Map (Leaflet) ---------------------------------------------------------------
+   Leaflet ships a light theme; these overrides make the popup and markers match the app. */
+.leaflet-container {
+  font-family: inherit;
+  background: #0f172a;
+}
+
+.kr-risk-marker {
+  background: transparent;
+  border: 0;
+}
+.kr-risk-marker span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9999px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+  color: #0b0f19;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.kr-popup .leaflet-popup-content-wrapper {
+  background: #0f172a;
+  color: #f8fafc;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+}
+.kr-popup .leaflet-popup-tip {
+  background: #0f172a;
+  border: 1px solid #334155;
+}
+.kr-popup .leaflet-popup-content {
+  margin: 12px 14px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.kr-popup .leaflet-popup-close-button {
+  color: #94a3b8;
+}
+.kr-popup .leaflet-popup-close-button:hover {
+  color: #f8fafc;
+}

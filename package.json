@@ -1,0 +1,43 @@
+{
+  "name": "khanrakshak",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:step4": "node --import ./tests/step4/register.mjs tests/step4/step4.test.mjs && node --import ./tests/step4/register.mjs tests/step4/startup.test.mjs",
+    "test:seed": "node --import ./tests/step4/register.mjs tests/seed/seed.test.mjs",
+    "test": "npm run test:step4 && npm run test:seed && npm run test:contractors && npm run test:documents && npm run test:riskmap && npm run test:analytics && npm run test:dashboard && npm run test:hero && npm run test:documents:ui",
+    "test:contractors": "node --import ./tests/step4/register.mjs tests/contractors/contractors.test.mjs",
+    "test:documents": "node --import ./tests/step4/register.mjs tests/documents/documents.test.mjs",
+    "test:documents:ui": "vitest run",
+    "test:riskmap": "node --import ./tests/step4/register.mjs tests/riskmap/riskmap.test.mjs",
+    "test:analytics": "node --import ./tests/step4/register.mjs tests/analytics/analytics.test.mjs",
+    "test:analytics:ui": "vitest run tests/analytics",
+    "test:dashboard": "node --import ./tests/step4/register.mjs tests/dashboard/dashboard.test.mjs",
+    "test:hero": "node --import ./tests/step4/register.mjs tests/hero/hero.test.mjs && node --import ./tests/step4/register.mjs tests/hero/heroScenario.test.mjs"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.383.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1",
+    "react-router-dom": "^6.26.0",
+    "recharts": "^2.12.7"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "jsdom": "^25.0.1",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.3.1",
+    "vitest": "^2.1.9"
+  }
+}
